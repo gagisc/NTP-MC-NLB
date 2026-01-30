@@ -1,0 +1,32 @@
+# Terraform Variables File Template
+# Copy this to terraform.tfvars and fill in your values
+
+# AWS Configuration
+aws_region       = "us-east-1"
+aws_instance_type = "t2.micro"
+aws_agent_count  = 1
+aws_vpc_cidr     = "10.0.0.0/16"
+aws_budget_limit = "5"
+
+# GCP Configuration
+gcp_project_id        = "your-project-id"
+gcp_project_number    = "your-project-number"
+gcp_region            = "us-central1"
+gcp_zone              = "us-central1-a"
+gcp_instance_type     = "e2-micro"
+gcp_subnet_cidr       = "10.1.0.0/16"
+gcp_billing_account_id = "your-billing-account-id"
+gcp_budget_limit      = 5
+
+# Environment
+environment        = "production"
+allowed_ssh_cidrs  = ["0.0.0.0/0"]  # CHANGE: Add your IP for security
+
+# Alerts
+alert_email_addresses = ["your-email@example.com"]
+gcp_notification_channels = [] # Add GCP notification channel IDs
+
+# K3s Configuration
+# Generate a token: openssl rand -base64 32
+k3s_token = "generate-this-with-openssl-rand-base64-32"
+k3s_version = "v1.27.7"

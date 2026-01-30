@@ -1,0 +1,165 @@
+---
+# NTP Server Deployment
+# Stratum 2 NTP server compliant with RFC 5905 for pool.ntp.org
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntp-config
+  namespace: ntp-server
+data:
+  ntp.conf: |
+    # NTP Configuration for pool.ntp.org participation
+    # Stratum 2 server using external reference clocks
+
+    # Stratum 1 reference clocks (upstream NTP servers)
+    server 0.pool.ntp.org iburst minpoll 4 maxpoll 6
+    server 1.pool.ntp.org iburst minpoll 4 maxpoll 6
+    server 2.pool.ntp.org iburst minpoll 4 maxpoll 6
+    server 3.pool.ntp.org iburst minpoll 4 maxpoll 6
+
+    # Local clock (for fallback)
+    server 127.127.1.0
+    fudge 127.127.1.0 stratum 10
+
+    # Access restrictions
+    restrict default kod notrap nomodify nopeer noquery
+    restrict -6 default kod notrap nomodify nopeer noquery
+    restrict 127.0.0.1
+    restrict -6 ::1
+    restrict 0.0.0.0 mask 0.0.0.0 nomodify notrap nopeer
+    restrict -6 ::/0 nomodify notrap nopeer
+
+    # Statistics
+    statistics loopstats peerstats clockstats
+    statsdir /var/log/ntp/
+
+    # Monitoring
+    rlimit memlock 32m
+    rlimit stacksize 16m
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntp-server
+  namespace: ntp-server
+  labels:
+    app: ntp-server
+    tier: primary
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ntp-server
+  template:
+    metadata:
+      labels:
+        app: ntp-server
+        tier: primary
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - ntp-server
+                topologyKey: kubernetes.io/hostname
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - ntp-server
+                topologyKey: cloud
+      
+      containers:
+        - name: ntp-server
+          image: cturra/ntp:latest
+          ports:
+            - containerPort: 123
+              protocol: UDP
+              name: ntp-udp
+          volumeMounts:
+            - name: ntp-config
+              mountPath: /etc/ntp.conf
+              subPath: ntp.conf
+            - name: ntp-logs
+              mountPath: /var/log/ntp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - ntpq -p | grep -q "SYNC"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - ntpq -p | grep -q "SYNC\|GPS"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+
+      volumes:
+        - name: ntp-config
+          configMap:
+            name: ntp-config
+        - name: ntp-logs
+          emptyDir: {}
+      
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntp-server
+  namespace: ntp-server
+  labels:
+    app: ntp-server
+  annotations:
+    service.spec.loadBalancerClass: "local"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: ntp-server
+  ports:
+    - name: ntp-udp
+      port: 123
+      targetPort: 123
+      protocol: UDP
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ntp-server-pdb
+  namespace: ntp-server
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ntp-server

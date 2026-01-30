@@ -1,0 +1,17 @@
+#!/bin/bash
+# AWS Cost Filter Configuration
+# Used by cost_monitoring.sh to filter relevant services
+
+{
+  "Dimensions": {
+    "Key": "SERVICE",
+    "Values": [
+      "Amazon Elastic Compute Cloud - Compute",
+      "AWS Lambda",
+      "EC2 - Other",
+      "EBS",
+      "Data Transfer",
+      "EC2-Instances"
+    ]
+  }
+}

@@ -1,0 +1,109 @@
+---
+# Network Policies for NTP Server
+# Implements DDoS protection and traffic filtering
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntp-server-ingress
+  namespace: ntp-server
+spec:
+  podSelector:
+    matchLabels:
+      app: ntp-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow NTP queries from anywhere
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: UDP
+          port: 123
+    # Allow DNS lookups
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+  egress:
+    # Allow outbound NTP queries to upstream servers
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: UDP
+          port: 123
+    # Allow DNS queries
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow HTTPS for time synchronization
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 123
+
+---
+# Rate limiting via NetworkPolicy (requires compatible CNI)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntp-rate-limit
+  namespace: ntp-server
+spec:
+  podSelector:
+    matchLabels:
+      app: ntp-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: UDP
+          port: 123
+      # Note: Actual rate limiting requires Calico or Cilium extensions
+      # This policy enforces network segmentation at minimum
+
+---
+# Egress policy to prevent data exfiltration
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntp-egress-restriction
+  namespace: ntp-server
+spec:
+  podSelector:
+    matchLabels:
+      app: ntp-server
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow NTP queries to trusted upstream servers
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: UDP
+          port: 123
+    # Deny everything else

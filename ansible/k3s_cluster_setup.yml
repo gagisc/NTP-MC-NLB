@@ -1,0 +1,86 @@
+---
+# Ansible Playbook for K3s Cluster Post-Deployment Configuration
+# Run this after Terraform completes to configure monitoring, NTP services, and auto-scaling
+
+- name: Configure K3s Cluster for NTP Server Deployment
+  hosts: k3s_control_plane
+  become: yes
+  gather_facts: yes
+  vars:
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+    ntp_namespace: "ntp-server"
+
+  tasks:
+    - name: Wait for K3s to be ready
+      shell: /usr/local/bin/k3s kubectl get nodes
+      register: nodes_result
+      until: nodes_result.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Create NTP namespace
+      shell: /usr/local/bin/k3s kubectl create namespace {{ ntp_namespace }} --dry-run=client -o yaml | /usr/local/bin/k3s kubectl apply -f -
+
+    - name: Label nodes by cloud provider
+      shell: |
+        /usr/local/bin/k3s kubectl label nodes $(hostname) cloud=aws --overwrite || true
+        for node in $(/usr/local/bin/k3s kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+          if [[ $node == *"gcp"* ]]; then
+            /usr/local/bin/k3s kubectl label nodes $node cloud=gcp --overwrite || true
+          fi
+        done
+
+    - name: Configure Calico for cross-cloud networking
+      shell: |
+        /usr/local/bin/k3s kubectl apply -f - <<EOF
+        apiVersion: projectcalico.org/v3
+        kind: BGPConfiguration
+        metadata:
+          name: default
+        spec:
+          logSeverityScreen: Info
+          nodeToNodeMeshEnabled: true
+          asNumber: 64512
+        EOF
+      ignore_errors: yes
+
+    - name: Copy monitoring manifests
+      copy:
+        src: "{{ playbook_dir }}/kubernetes/"
+        dest: "/tmp/k8s-manifests/"
+        mode: '0644'
+
+    - name: Apply monitoring stack (Prometheus + Grafana)
+      shell: /usr/local/bin/k3s kubectl apply -f /tmp/k8s-manifests/monitoring/
+
+    - name: Apply NTP server deployment
+      shell: /usr/local/bin/k3s kubectl apply -f /tmp/k8s-manifests/ntp/
+
+    - name: Apply auto-scaling configuration
+      shell: /usr/local/bin/k3s kubectl apply -f /tmp/k8s-manifests/autoscaling/
+
+    - name: Apply network policies
+      shell: /usr/local/bin/k3s kubectl apply -f /tmp/k8s-manifests/network-policies/
+
+    - name: Verify cluster health
+      shell: |
+        /usr/local/bin/k3s kubectl get nodes
+        /usr/local/bin/k3s kubectl get pods -A
+      register: cluster_status
+
+    - name: Display cluster status
+      debug:
+        msg: "{{ cluster_status.stdout }}"
+
+    - name: Export kubeconfig for local access
+      fetch:
+        src: "{{ kubeconfig_path }}"
+        dest: "./kubeconfig"
+        flat: yes
+      become: no
+
+  handlers:
+    - name: Restart K3s service
+      systemd:
+        name: k3s
+        state: restarted
