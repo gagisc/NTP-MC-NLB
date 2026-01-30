@@ -1,0 +1,149 @@
+name: Kubernetes Manifest Validation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'kubernetes/**'
+      - '.github/workflows/k8s-validate.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'kubernetes/**'
+
+jobs:
+  yaml-validation:
+    name: YAML Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install yamllint
+        run: pip install yamllint
+      
+      - name: Validate YAML Syntax
+        run: yamllint -d relaxed kubernetes/ --format parsable
+        continue-on-error: true
+      
+      - name: Python YAML Validation
+        run: |
+          python3 << 'EOF'
+          import yaml
+          import glob
+          import sys
+          
+          errors = 0
+          for file in glob.glob('kubernetes/**/*.yaml', recursive=True):
+            try:
+              with open(file) as f:
+                yaml.safe_load(f)
+              print(f"✅ {file}")
+            except Exception as e:
+              print(f"❌ {file}: {e}")
+              errors += 1
+          
+          sys.exit(errors)
+          EOF
+
+  manifest-validation:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup kubeconform
+        run: |
+          wget https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform-linux-amd64.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+      
+      - name: Validate Kubernetes Manifests
+        run: |
+          find kubernetes -name '*.yaml' -type f | while read file; do
+            echo "Validating: $file"
+            kubeconform -summary -output json "$file" || true
+          done
+        continue-on-error: true
+
+  security-scanning:
+    name: Security Scanning (Kubesec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup kubesec
+        run: |
+          wget https://github.com/controlplaneio/kubesec/releases/latest/download/kubesec_linux_amd64.tar.gz
+          tar xf kubesec_linux_amd64.tar.gz
+          sudo mv kubesec /usr/local/bin/
+      
+      - name: Scan Kubernetes Manifests for Security Issues
+        run: |
+          echo "## 🔒 Kubernetes Security Scan Results" > security-report.md
+          echo "" >> security-report.md
+          
+          find kubernetes -name '*.yaml' -type f | while read file; do
+            echo "### $file" >> security-report.md
+            kubesec scan "$file" -o json | python3 -m json.tool >> security-report.md 2>&1 || true
+            echo "" >> security-report.md
+          done
+          
+          cat security-report.md
+        continue-on-error: true
+
+  best-practices:
+    name: Kubernetes Best Practices
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      
+      - name: Check Best Practices
+        run: |
+          echo "## ✅ Kubernetes Best Practices Checklist" > practices-report.md
+          echo "" >> practices-report.md
+          
+          echo "### Resource Limits & Requests" >> practices-report.md
+          grep -r "resources:" kubernetes/ --include="*.yaml" && echo "✅ Resource limits defined" >> practices-report.md || echo "⚠️  Missing resource limits in some manifests" >> practices-report.md
+          echo "" >> practices-report.md
+          
+          echo "### Health Checks (Liveness & Readiness)" >> practices-report.md
+          grep -r "livenessProbe:" kubernetes/ --include="*.yaml" && echo "✅ Liveness probes configured" >> practices-report.md || echo "⚠️  Missing liveness probes" >> practices-report.md
+          grep -r "readinessProbe:" kubernetes/ --include="*.yaml" && echo "✅ Readiness probes configured" >> practices-report.md || echo "⚠️  Missing readiness probes" >> practices-report.md
+          echo "" >> practices-report.md
+          
+          echo "### Pod Disruption Budget" >> practices-report.md
+          grep -r "PodDisruptionBudget" kubernetes/ --include="*.yaml" && echo "✅ PDB configured" >> practices-report.md || echo "⚠️  No PDB found" >> practices-report.md
+          echo "" >> practices-report.md
+          
+          echo "### Network Policies" >> practices-report.md
+          grep -r "NetworkPolicy" kubernetes/ --include="*.yaml" && echo "✅ Network policies defined" >> practices-report.md || echo "⚠️  No network policies found" >> practices-report.md
+          echo "" >> practices-report.md
+          
+          echo "### Pod Anti-Affinity" >> practices-report.md
+          grep -r "podAntiAffinity:" kubernetes/ --include="*.yaml" && echo "✅ Pod anti-affinity configured" >> practices-report.md || echo "⚠️  No pod anti-affinity found" >> practices-report.md
+          echo "" >> practices-report.md
+          
+          echo "### Horizontal Pod Autoscaler" >> practices-report.md
+          grep -r "HorizontalPodAutoscaler" kubernetes/ --include="*.yaml" && echo "✅ HPA configured" >> practices-report.md || echo "⚠️  No HPA found" >> practices-report.md
+          
+          cat practices-report.md
+        continue-on-error: true
+      
+      - name: Comment PR with Best Practices Report
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('practices-report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
