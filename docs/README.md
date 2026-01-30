@@ -4,7 +4,7 @@ A production-ready, cost-optimized, multi-cloud NTP server infrastructure spanni
 
 ## 🎯 Project Goals
 
-- **Demonstrate Kubernetes Skills**: Single K3s cluster spanning AWS and GCP with cross-cloud networking
+- **Kubernetes Element**: Single K3s cluster spanning AWS and GCP with cross-cloud networking
 - **Cost Optimization**: Stay within free tier during trial (~$0); estimated $92/month after
 - **High Availability**: Stratum 2 NTP server compliant with pool.ntp.org requirements
 - **Automated Management**: Infrastructure-as-Code (Terraform), configuration automation (Ansible), orchestration (Kubernetes)
