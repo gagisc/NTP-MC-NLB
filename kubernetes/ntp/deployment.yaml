@@ -37,7 +37,6 @@ data:
     # Monitoring
     rlimit memlock 32m
     rlimit stacksize 16m
-
 ---
 apiVersion: apps/v1
 kind: Deployment

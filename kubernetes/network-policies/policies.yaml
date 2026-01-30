@@ -55,7 +55,6 @@ spec:
       ports:
         - protocol: UDP
           port: 123
-
 ---
 # Rate limiting via NetworkPolicy (requires compatible CNI)
 apiVersion: networking.k8s.io/v1
